@@ -1,0 +1,163 @@
+#!/bin/bash
+
+# David Santamaria
+# October 25 2020
+
+# Exit on error
+set -e
+
+# This site is where we will download our jar
+SERVER_JAR_DOWNLOAD_URL="https://mcversions.net/download"
+SETUP=""
+
+# Our default config options
+INSTALL_DIR_PATH="${HOME}/Minecraft"
+SERVER_JAR_VERSION="1.16.1" # default for speedrunning
+SERVER_JAR_ARGS="-Xms 2G -Xmx 4G -jar nogui"
+VERBOSE=1 # By default display status messages
+HOSTNAME=""
+SSH_KEY_PATH=""
+
+# Some useful info in case we error
+trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
+trap 'if [ $? != "0" -a last_command != "exit" ]; then echo "\"${last_command}\" failed with exit code $?. Is ${SERVER_JAR_VERSION} a valid minecraft version?"; fi' EXIT
+
+# Usage
+usage() {
+    usage="Usage: $0 (OPTIONS)
+    OPTIONS:
+        setup [h|--hostname] [k|--key]
+        Setup the server on the machine at [hostname] using ssh with [ssh key].
+
+        -q | --quiet
+        Do not display status messages.
+
+        -v | --version [MC Version]
+        Setup a server of a specific version. The default version is ${SERVER_JAR_VERSION}.
+
+        -a | --args [arguments]
+        Provide the java arguments to run the server jar with. By default, these are: ${SERVER_JAR_ARGS}.
+         
+        -p | --install-path [path]
+        Set the directory in which to install the server. By default, this is /home/<user>/Minecraft/
+        The user must have permission to write to this directory.
+
+        --help
+        Display this page. Passing the -h option after a setup will be interpreted as a hostname argument instead of help.
+
+    If no options are provided then the server will be installed on the local machine with the default 
+    configuration options (shown above)."
+    echo "${usage}"
+}
+
+# Condense long arguments into their short counterparts.
+# https://stackoverflow.com/questions/12022592/how-can-i-use-long-options-with-the-bash-getopts-builtin
+for arg in "$@"; do
+    shift
+    case "${arg}" in
+        "--help")           set -- "$@" "-h" ;;
+        "--quiet")          set -- "$@" "-q" ;;
+        "--version")        set -- "$@" "-v" ;;
+        "--args")           set -- "$@" "-a" ;;
+        "--install-path")   set -- "$@" "-p" ;;
+        "--hostname")       set -- "$@" "-x" ;;
+        "--key")            set -- "$@" "-k" ;;
+        "--setup")          set -- "$@" "-s" ;;
+        *)                  set -- "$@" "${arg}"
+    esac
+done
+while getopts "sqhv:a:p:k:x:" opt; do
+    case "${opt}" in
+
+        q) 
+            VERBOSE=0 ;;
+        v) 
+            SERVER_JAR_VERSION="${OPTARG}" ;;
+        a) 
+            SERVER_JAR_ARGS="${OPTARG}" ;;
+        p) 
+            INSTALL_DIR_PATH="${OPTARG}" ;;
+        x) 
+            HOSTNAME="${OPTARG}" ;;
+        k)
+            SSH_KEY_PATH="${OPTARG}" ;;
+        s)
+            SETUP=1 ;;
+        \?)
+            usage
+            exit 1
+            ;;
+    esac
+done
+shift "$(($OPTIND -1))"
+
+if ! [ -z "${SETUP}" ]; then
+    if [ -z "${HOSTNAME}" -o -z "${SSH_KEY_PATH}" ]; then
+        echo "setup requires a hostname and ssh key to use!"
+        usage
+        exit 1
+    fi
+fi
+
+run() {
+    if [ $VERBOSE -eq 1 ]; then echo "Starting the server..."; fi
+    cd "${INSTALL_DIR_PATH}"
+    screen -S minecraft java "${SERVER_JAR_ARGS}" "server.jar"
+}
+
+install() {
+    mkdir -p ${INSTALL_DIR_PATH}
+    if [ $VERBOSE -eq 1 ]; then echo "Grabbing the server jar file..."; fi
+
+    jar_url=$(curl https://mcversions.net/download/"${SERVER_JAR_VERSION}" | sed -r 's/^.*(https:\/\/launcher\.mojang\.com[a-zA-Z0-9\/]*server\.jar).*$/\1/g')
+    if [[ ! $jar_url =~ ^https://launcher\.mojang\.com[a-zA-Z0-9\/]*server\.jar$ ]]; then
+        echo "Jar URL was found to be in the wrong format! $jar_url"
+        exit 1
+    fi
+
+    wget "$jar_url" -O "${INSTALL_DIR_PATH}/server.jar" # > /dev/null 2>&1
+    if [ $VERBOSE -eq 1 ]; then 
+        echo "Done."
+        echo "Setting up the server..."
+    fi
+    cd "${INSTALL_DIR_PATH}"
+    java -jar "server.jar" nogui || true # > /dev/null 2>&1 # || true because we expect this to fail
+    sed -i 's/false/true/g' "${INSTALL_DIR_PATH}/eula.txt"
+    if [ $VERBOSE -eq 1 ]; then
+        echo "Done."
+    fi
+}
+
+install_deps() {
+    if [ $VERBOSE -eq 1 ]; then echo "Installing java..."; fi
+    yes | sudo apt-get install default-jdk
+    if [ $VERBOSE -eq 1 ]; then echo "Done"; fi
+}
+
+update() {
+    if [ $VERBOSE -eq 1 ]; then echo "Updating the machine..."; fi
+    sudo apt-get update && sudo apt-get upgrade -y > /dev/null 2>&1 
+    if [ $VERBOSE -eq 1 ]; then echo "Done."; fi
+}
+
+main() {
+    if ! [ -z $SETUP ]; then
+        scp -i "${SSH_KEY_PATH}" "$0" "${HOSTNAME}":"script.sh" # > /dev/null 2>&1
+        ssh -i "${SSH_KEY_PATH}" "${HOSTNAME}" 'bash script.sh' # > /dev/null 2>&1
+        echo "Done."
+        exit 0
+    fi
+
+    echo "VERBOSE: ${VERBOSE}
+    VERSION: ${SERVER_JAR_VERSION}
+    INSTALL_DIR_PATH: ${INSTALL_DIR_PATH}
+    SERVER_JAR_ARGS: ${SERVER_JAR_ARGS}
+    HOSTNAME: ${HOSTNAME}
+    SSH_KEY: ${SSH_KEY_PATH}"
+    update
+    install_deps
+    install
+    run
+}
+
+main
