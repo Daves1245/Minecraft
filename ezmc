@@ -71,7 +71,7 @@ for arg in "$@"; do
         *)                  set -- "$@" "${arg}"
     esac
 done
-while getopts "sqhv:a:p:k:x:" opt; do
+while getopts "isqhv:a:p:k:x:" opt; do
     case "${opt}" in
 
         q) 
