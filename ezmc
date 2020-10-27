@@ -17,6 +17,7 @@ SERVER_JAR_ARGS="-Xms 2G -Xmx 4G -jar nogui"
 VERBOSE=1 # By default display status messages
 HOSTNAME=""
 SSH_KEY_PATH=""
+RUN=1
 
 # Some useful info in case we error
 trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
@@ -42,6 +43,9 @@ usage() {
         Set the directory in which to install the server. By default, this is /home/<user>/Minecraft/
         The user must have permission to write to this directory.
 
+        install
+        Install, but do not run the server. By default, this is off.
+
         --help
         Display this page. Passing the -h option after a setup will be interpreted as a hostname argument instead of help.
 
@@ -63,6 +67,7 @@ for arg in "$@"; do
         "--hostname")       set -- "$@" "-x" ;;
         "--key")            set -- "$@" "-k" ;;
         "--setup")          set -- "$@" "-s" ;;
+        "install")          set -- "$@" "-i" ;;
         *)                  set -- "$@" "${arg}"
     esac
 done
@@ -83,6 +88,8 @@ while getopts "sqhv:a:p:k:x:" opt; do
             SSH_KEY_PATH="${OPTARG}" ;;
         s)
             SETUP=1 ;;
+        i)
+            RUN=0 ;;
         \?)
             usage
             exit 1
@@ -147,16 +154,11 @@ main() {
         echo "Done."
         exit 0
     fi
-
-    echo "VERBOSE: ${VERBOSE}
-    VERSION: ${SERVER_JAR_VERSION}
-    INSTALL_DIR_PATH: ${INSTALL_DIR_PATH}
-    SERVER_JAR_ARGS: ${SERVER_JAR_ARGS}
-    HOSTNAME: ${HOSTNAME}
-    SSH_KEY: ${SSH_KEY_PATH}"
     update
     install_deps
-    install
+    if [ $RUN -eq 1 ]; then
+        install
+    fi
     run
 }
 
